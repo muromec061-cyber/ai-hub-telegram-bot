@@ -1,0 +1,47 @@
+# Render Blueprint for ai-hub-telegram-bot
+# Обновляет существующий сервис srv-d9hh82d8nd3s73d1nr60
+
+services:
+  - type: web
+    name: ai-hub-telegram-bot
+    runtime: python
+    plan: starter
+    branch: main
+    rootDir: .
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
+    startCommand: "alembic upgrade head && python main.py --mode polling"
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: ADMIN_TELEGRAM_IDS
+        value: "8997785213,5883513384"
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_SYNC
+        sync: false
+      - key: SUPABASE_URL
+        value: "https://upcjojuchidkcrqbgnmp.supabase.co"
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: SUPABASE_PAT
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: MAX_PARALLEL_TASKS
+        value: "3"
+      - key: ACTIVE_LLM
+        value: groq
+      - key: PORT
+        value: "10000"

@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ai_startup_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio aiosqlite httpx
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check .
+
+      - name: Test
+        env:
+          APP_ENV: test
+          TELEGRAM_BOT_TOKEN: "test_token_for_pytest_xxxxxxxxxxxxx"
+          DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/ai_startup_test"
+          DATABASE_URL_SYNC: "postgresql+psycopg2://postgres:postgres@localhost:5432/ai_startup_test"
+          LOG_LEVEL: WARNING
+        run: |
+          pytest -v --tb=short
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t ai-startup:${{ github.sha }} .
+
+      - name: Smoke test container
+        run: |
+          docker run --rm -d --name test-bot \
+            -e TELEGRAM_BOT_TOKEN=test_token_for_pytest_xxxxxxxxxxxxx \
+            -e DATABASE_URL=sqlite+aiosqlite:///:memory: \
+            ai-startup:${{ github.sha }}
+          sleep 5
+          docker logs test-bot
+          docker stop test_bot 2>/dev/null || docker stop test-bot 2>/dev/null || true

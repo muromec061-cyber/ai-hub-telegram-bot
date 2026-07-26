@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+
+# Virtual env
+venv/
+.venv/
+env/
+ENV/
+
+# Env
+.env
+.env.local
+.env.*.local
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets
+secrets/
+*.pem
+*.key
+credentials.json
+
+# Obsidian vault
+Obsidian/
+
+# Backups
+backups/*.tar.gz
+backups/*.zip
+
+# Docker
+docker-compose.override.yml
+
+# Generated
+generated/
+projects/
+
+# OpenClaw cloned sidecar
+openclaw/

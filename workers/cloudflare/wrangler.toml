@@ -1,0 +1,14 @@
+name = "ai-startup-gateway"
+main = "worker.js"
+compatibility_date = "2024-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[ai]
+binding = "AI"
+
+[vars]
+BACKEND_URL = "https://api.your-domain.com"
+
+# Secrets (set via: wrangler secret put TELEGRAM_BOT_TOKEN)
+# TELEGRAM_BOT_TOKEN
+# TELEGRAM_WEBHOOK_SECRET

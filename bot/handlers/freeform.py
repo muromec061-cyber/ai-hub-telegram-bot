@@ -28,17 +28,26 @@ REPLY_KEYWORDS = {
     "💎 Подписка", "⚙️ Настройки", "🛠 Админ", "❓ Помощь", "❌ Отмена",
 }
 
+CHAT_GREETINGS = {
+    "привет", "здравствуй", "здравствуйте", "хай", "хей", "хелло",
+    "hello", "hi", "hey", "yo", "йоу",
+    "добрый день", "доброе утро", "добрый вечер", "доброй ночи",
+    "как дела", "как ты", "что нового", "как жизнь", "что делаешь",
+}
+
 BUILD_KEYWORDS = (
     "создай", "сделай", "напиши", "разработай", "собери", "построй",
-    "запусти", "задеплой", "хочу", "нужен", "нужна", "нужно", "сделать",
-    "создать", "разверни", "deploy", "build", "create", "make",
+    "запусти", "задеплой", "разверни", "deploy", "build", "create", "make",
     "telegram bot", "телеграм бот", "telegram-бот", "сайт", "saas", "приложение",
     "app", "website", "landing", "лендинг", "стартап", "startup",
+    "хочу", "нужен", "нужна", "нужно",
 )
 
 
 def _looks_like_build(text: str) -> bool:
     t = text.lower()
+    if any(g in t for g in CHAT_GREETINGS):
+        return False
     return any(k in t for k in BUILD_KEYWORDS)
 
 
@@ -85,7 +94,7 @@ async def _quick_chat(message: Message, user, text: str) -> None:
                 messages=[LLMMessage(role="user", content=text)],
                 temperature=0.7, max_tokens=2048,
             )
-            response = await llm.complete(req)
+            response = await asyncio.wait_for(llm.complete(req), timeout=45.0)
             anim_task.cancel()
             try:
                 await anim_task
@@ -96,6 +105,12 @@ async def _quick_chat(message: Message, user, text: str) -> None:
             await anim.typewriter_with_blink(
                 message.bot, message.chat.id,
                 response.content or "(пустой ответ)",
+            )
+        except asyncio.TimeoutError:
+            anim_task.cancel()
+            await status_msg.edit_text(
+                f"⏰ <b>LLM не ответил за 45 секунд.</b>\n\n"
+                f"Попробуй ещё раз или смени модель: 🤖 Модель AI"
             )
         except Exception as e:
             await status_msg.edit_text(f"❌ <b>Ошибка:</b>\n<code>{e}</code>")

@@ -109,19 +109,6 @@ class ServiceCluster:
     async def openclaw(self) -> OpenClawClient | None:
         if self._openclaw is None and self._settings.openclaw.enabled:
             self._openclaw = OpenClawClient()
-            # Auto-start local sidecar if installed
-            try:
-                from workers.openclaw import OpenClawLauncher
-                launcher = OpenClawLauncher()
-                if launcher.is_installed() and not launcher.is_running():
-                    started = launcher.start()
-                    if started:
-                        logger.info("OpenClaw sidecar launched")
-                        # Give it time to boot
-                        import asyncio as _aio
-                        await _aio.sleep(2.0)
-            except Exception as e:
-                logger.warning(f"OpenClaw auto-launch skipped: {e}")
         return self._openclaw
 
     async def health(self) -> dict:

@@ -5,6 +5,7 @@ Provides: state management, tool registry, memory access, LLM calls.
 from __future__ import annotations
 
 import json
+import asyncio
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -128,7 +129,7 @@ class BaseAgent(ABC):
             tools=self.get_openai_tools() if self.tools else None,
         )
         try:
-            response = await self.llm.complete(request)
+            response = await asyncio.wait_for(self.llm.complete(request), timeout=60.0)
             return response.content, {
                 "tokens_in": response.tokens_in,
                 "tokens_out": response.tokens_out,

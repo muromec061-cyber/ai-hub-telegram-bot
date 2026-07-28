@@ -119,19 +119,27 @@ async def nav_model_picker(callback, user):
 @router.callback_query(F.data.startswith("model:pick:"))
 async def model_pick(callback, user):
     provider = callback.data.split(":")[2]
-    # Persist user preference
+    # Re-fetch user in a fresh session to avoid detached-instance errors
     from db.repositories import UserRepository
-    async with get_session() as session:
-        await UserRepository(session).update(user, model_preference=provider) if hasattr(user, "model_preference") else None
-    # Active switch (in-memory)
+    sf = callback.bot._app_state["session_factory"]
+    async with sf() as session:
+        repo = UserRepository(session)
+        fresh = await repo.get(user.id)
+        if fresh:
+            try:
+                await repo.update(fresh, model_preference=provider)
+            except Exception as e:
+                logger.warning(f"model_preference save skipped: {e}")
+    # Active switch (in-memory, in-process)
     get_settings().llm.active_llm = provider
-    # Reset cluster LLM cache
+    # Reset cluster LLM cache so next call rebuilds
     cluster = callback.bot._app_state["cluster"]  # type: ignore[attr-defined]
     cluster._llm = None
     cluster._llm_name = None
+    is_admin = user.role in (UserRole.ADMIN, UserRole.OWNER)
     text = (
         f"✅ <b>Модель переключена:</b> <code>{provider}</code>\n\n"
         f"Новые запросы пойдут через эту модель. Можно продолжать!"
     )
-    await callback.message.answer(text, reply_markup=keyboards.main_dashboard(user, user.role in (UserRole.ADMIN, UserRole.OWNER)))
+    await callback.message.answer(text, reply_markup=keyboards.main_dashboard(user, is_admin=is_admin))
     await callback.answer(f"Модель: {provider}")

@@ -1,5 +1,5 @@
 """
-Main entry point — runs the Telegram bot (polling mode by default).
+Main entry point — runs the Telegram bot (polling or webhook mode).
 
 Usage:
     python main.py
@@ -22,6 +22,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="AI Startup Bot")
     p.add_argument("--mode", choices=["polling", "webhook", "scheduler", "mcp"], default="polling")
     p.add_argument("--webhook-url", type=str, default=None)
+    p.add_argument("--port", type=int, default=None)
     return p.parse_args()
 
 
@@ -56,7 +57,7 @@ async def main():
         await run_polling()
     elif args.mode == "webhook":
         from bot.bot import run_webhook
-        await run_webhook(args.webhook_url or settings.telegram.webhook_url)
+        await run_webhook(args.webhook_url or settings.telegram.webhook_url, port=args.port)
     elif args.mode == "scheduler":
         await run_scheduler()
     elif args.mode == "mcp":

@@ -168,11 +168,50 @@ async def run_polling() -> None:
         await on_shutdown()
 
 
-async def run_webhook(webhook_url: str) -> None:
+async def run_webhook(webhook_url: str, port: int | None = None) -> None:
+    """Run bot in webhook mode with aiohttp HTTP server (compatible with Adaptable/Render)."""
+    from aiohttp import web
+
     app = setup_bot()
     await on_startup()
+
+    bot = app["bot"]
+    dp = app["dp"]
+    port = port or int(get_settings().port or 10000)
+
+    async def health(request):
+        return web.json_response({"ok": True, "bot": bot._me.username if hasattr(bot, "_me") else "unknown"})
+
+    async def telegram_webhook(request):
+        try:
+            update_data = await request.json()
+        except Exception:
+            return web.Response(status=400, text="bad json")
+        from aiogram import types
+        update = types.Update(**update_data)
+        await dp.feed_update(bot, update)
+        return web.json_response({"ok": True})
+
+    aio_app = web.Application()
+    aio_app.router.add_get("/health", health)
+    aio_app.router.add_post("/webhook/telegram", telegram_webhook)
+    aio_app.router.add_post("/webhook/{token}", telegram_webhook)  # allow token-suffixed
+
+    runner = web.AppRunner(aio_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Webhook server listening on 0.0.0.0:{port}")
+
+    if webhook_url:
+        try:
+            await bot.set_webhook(webhook_url)
+            logger.info(f"Webhook set: {webhook_url}")
+        except Exception as e:
+            logger.warning(f"set_webhook failed (will use polling fallback): {e}")
+
     try:
-        await app["bot"].set_webhook(webhook_url)
-        logger.info(f"Webhook set: {webhook_url}")
+        await asyncio.Event().wait()  # run forever
     finally:
+        await runner.cleanup()
         await on_shutdown()

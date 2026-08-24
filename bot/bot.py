@@ -1,8 +1,5 @@
 """
 Main bot module — wires everything together.
-
-Uses ServiceCluster as single source of truth for LLM + OpenClaw + services.
-All handlers use the new UI (keyboards, animation, dashboards).
 """
 from __future__ import annotations
 
@@ -17,19 +14,18 @@ from aiogram.fsm.storage.redis import RedisStorage
 
 from agents import Orchestrator, TaskQueue
 from bot.handlers import admin as admin_handler
+from bot.handlers import agent as agent_handler
 from bot.handlers import freeform, projects, settings as settings_handler
 from bot.handlers import start, tasks
 from bot.middlewares import AuthMiddleware
-from bot.ui import anim, dashboard, keyboards
-from config.env.settings import get_settings
 from config.logging import get_logger
+from config.env.settings import get_settings
 from db.models import AsyncSessionLocal, close_db, init_db
-from services import ServiceCluster, get_cluster
+from services import get_cluster
 from services.cloudflare.client import CloudflareService
 from services.github.client import GitHubService
 
 logger = get_logger("bot")
-
 _app_instance: dict[str, Any] = {}
 
 
@@ -42,64 +38,41 @@ def get_app() -> dict[str, Any]:
 def setup_bot() -> dict[str, Any]:
     if _app_instance:
         return _app_instance
-
     cfg = get_settings()
     cluster = get_cluster()
+    bot = Bot(token=cfg.telegram.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 
-    bot = Bot(
-        token=cfg.telegram.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
-
-    # FSM storage — MemoryStorage by default; Redis only if REDIS_URL set and reachable
     storage: Any = MemoryStorage()
-    use_redis = (
-        cfg.app_env != "development"
-        and cfg.security.redis_url
-        and "redis://" in cfg.security.redis_url
-    )
+    use_redis = cfg.app_env != "development" and cfg.security.redis_url and "redis://" in cfg.security.redis_url
     if use_redis:
         try:
             import redis as _redis_sync
             sync_client = _redis_sync.from_url(cfg.security.redis_url, socket_connect_timeout=2)
             sync_client.ping()
             sync_client.close()
-            # Synchronous ping succeeded, build async client
             import redis.asyncio as aioredis
-            client = aioredis.from_url(cfg.security.redis_url)
-            storage = RedisStorage(redis=client)
-            logger.info(f"FSM: Redis at {cfg.security.redis_url}")
-        except Exception as e:
-            logger.warning(f"Redis unavailable ({e}), using MemoryStorage")
-    else:
-        logger.info("FSM: MemoryStorage")
+            storage = RedisStorage(redis=aioredis.from_url(cfg.security.redis_url))
+        except Exception as exc:
+            logger.warning(f"Redis unavailable ({exc}), using MemoryStorage")
 
     dp = Dispatcher(storage=storage)
-
-    # Middleware
     auth_mw = AuthMiddleware(AsyncSessionLocal)
     dp.message.middleware(auth_mw)
     dp.callback_query.middleware(auth_mw)
 
-    # Routers
     dp.include_router(start.router)
     dp.include_router(projects.router)
     dp.include_router(tasks.router)
     dp.include_router(settings_handler.router)
     dp.include_router(admin_handler.router)
+    dp.include_router(agent_handler.router)
     dp.include_router(freeform.router)
 
-    # Services via cluster
-    github = None
-    cloudflare = None
-    if cfg.github.token:
-        github = GitHubService()
-    if cfg.cloudflare.api_token:
-        cloudflare = CloudflareService()
+    github = GitHubService() if cfg.github.token else None
+    cloudflare = CloudflareService() if cfg.cloudflare.api_token else None
 
-    # Orchestrator (uses cluster for LLM)
     orchestrator = Orchestrator(
-        llm=None,  # orchestrator will use cluster
+        llm=None,
         base_dir="generated",
         github=github,
         cloudflare=cloudflare,
@@ -108,17 +81,17 @@ def setup_bot() -> dict[str, Any]:
     )
     queue = TaskQueue(orchestrator, max_concurrent=cfg.max_parallel_tasks)
 
-    _app_instance["bot"] = bot
-    _app_instance["dp"] = dp
-    _app_instance["orchestrator"] = orchestrator
-    _app_instance["task_queue"] = queue
-    _app_instance["session_factory"] = AsyncSessionLocal
-    _app_instance["cluster"] = cluster
-    _app_instance["github"] = github
-    _app_instance["cloudflare"] = cloudflare
-
+    _app_instance.update({
+        "bot": bot,
+        "dp": dp,
+        "orchestrator": orchestrator,
+        "task_queue": queue,
+        "session_factory": AsyncSessionLocal,
+        "cluster": cluster,
+        "github": github,
+        "cloudflare": cloudflare,
+    })
     bot._app_state = _app_instance  # type: ignore[attr-defined]
-
     return _app_instance
 
 
@@ -126,31 +99,25 @@ def _make_notifier(bot: Bot):
     async def notify(telegram_id: int, text: str):
         try:
             await bot.send_message(telegram_id, text)
-        except Exception as e:
-            logger.error(f"Notify failed for {telegram_id}: {e}")
+        except Exception as exc:
+            logger.error(f"Notify failed for {telegram_id}: {exc}")
     return notify
 
 
 async def on_startup() -> None:
-    logger.info("Starting bot...")
     await init_db()
     app = setup_bot()
     bot = app["bot"]
-    cluster = app["cluster"]
-
-    # Health snapshot (best effort)
     try:
-        snap = await cluster.health()
+        snap = await app["cluster"].health()
         logger.info(f"Cluster health: {snap}")
-    except Exception as e:
-        logger.warning(f"Cluster health check failed: {e}")
-
+    except Exception as exc:
+        logger.warning(f"Cluster health check failed: {exc}")
     me = await bot.get_me()
     logger.info(f"Bot @{me.username} ({me.id}) started")
 
 
 async def on_shutdown() -> None:
-    logger.info("Shutting down...")
     app = get_app()
     cluster = app.get("cluster")
     if cluster:
@@ -169,14 +136,10 @@ async def run_polling() -> None:
 
 
 async def run_webhook(webhook_url: str, port: int | None = None) -> None:
-    """Run bot in webhook mode with aiohttp HTTP server (compatible with Adaptable/Render)."""
     from aiohttp import web
-
     app = setup_bot()
     await on_startup()
-
-    bot = app["bot"]
-    dp = app["dp"]
+    bot, dp = app["bot"], app["dp"]
     port = port or int(get_settings().port or 10000)
 
     async def health(request):
@@ -188,30 +151,24 @@ async def run_webhook(webhook_url: str, port: int | None = None) -> None:
         except Exception:
             return web.Response(status=400, text="bad json")
         from aiogram import types
-        update = types.Update(**update_data)
-        await dp.feed_update(bot, update)
+        await dp.feed_update(bot, types.Update(**update_data))
         return web.json_response({"ok": True})
 
     aio_app = web.Application()
     aio_app.router.add_get("/health", health)
     aio_app.router.add_post("/webhook/telegram", telegram_webhook)
-    aio_app.router.add_post("/webhook/{token}", telegram_webhook)  # allow token-suffixed
-
+    aio_app.router.add_post("/webhook/{token}", telegram_webhook)
     runner = web.AppRunner(aio_app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logger.info(f"Webhook server listening on 0.0.0.0:{port}")
-
     if webhook_url:
         try:
             await bot.set_webhook(webhook_url)
-            logger.info(f"Webhook set: {webhook_url}")
-        except Exception as e:
-            logger.warning(f"set_webhook failed (will use polling fallback): {e}")
-
+        except Exception as exc:
+            logger.warning(f"set_webhook failed: {exc}")
     try:
-        await asyncio.Event().wait()  # run forever
+        await asyncio.Event().wait()
     finally:
         await runner.cleanup()
         await on_shutdown()
